@@ -29,6 +29,11 @@ def test(inputShape, indexShape, axis, test_dtype, device):
     rank = len(inputShape)
     outTensor = gather(rank, axis, inputTensor, indexTensor)#
 
+    indexSize  = np.prod(indexShape)
+    axisSize   = inputShape[axis]
+    stride     = inputTensor.stride()[axis]
+    inputSize  = np.prod(inputShape)
+
     Q_output = torch.zeros(outTensor.shape, device=device, dtype=test_dtype)
     input_ptr = ctypes.cast(inputTensor.data_ptr(), ctypes.POINTER(ctypes.c_void_p))
     index_ptr = ctypes.cast(indexTensor.data_ptr(), ctypes.POINTER(ctypes.c_void_p))
@@ -37,11 +42,29 @@ def test(inputShape, indexShape, axis, test_dtype, device):
     if test_dtype == torch.float32:
         if device == "cuda":
             torch_gather_time = performance.CudaProfile((gather, (rank, axis, inputTensor, indexTensor)))
-            custom_gather_time = 0
+            lib.gather_nv_f32.argtypes = [
+                ctypes.POINTER(ctypes.c_void_p),
+                ctypes.POINTER(ctypes.c_void_p),
+                ctypes.POINTER(ctypes.c_void_p),
+                ctypes.c_longlong,
+                ctypes.c_longlong,
+                ctypes.c_longlong,
+                ctypes.c_longlong
+            ]
+            custom_gather_time = performance.CudaProfile((lib.gather_nv_f32, (input_ptr, index_ptr, output_ptr, stride, axisSize, inputSize, indexSize)))
     if test_dtype == torch.float16:
         if device == "cuda":
             torch_gather_time = performance.CudaProfile((gather, (rank, axis, inputTensor, indexTensor)))
-            custom_gather_time = 0
+            lib.gather_nv_f16.argtypes = [
+                ctypes.POINTER(ctypes.c_void_p),
+                ctypes.POINTER(ctypes.c_void_p),
+                ctypes.POINTER(ctypes.c_void_p),
+                ctypes.c_longlong,
+                ctypes.c_longlong,
+                ctypes.c_longlong,
+                ctypes.c_longlong
+            ]
+            custom_gather_time = performance.CudaProfile((lib.gather_nv_f16, (input_ptr, index_ptr, output_ptr, stride, axisSize, inputSize, indexSize)))
     performance.logBenchmark(torch_gather_time, custom_gather_time)
 
     tmpa = outTensor.to('cpu').numpy().flatten()
@@ -51,6 +74,10 @@ def test(inputShape, indexShape, axis, test_dtype, device):
 
     rtol = atol / max(abs(tmpb) + 1e-8)
 
+    # print(inputTensor)
+    # print(indexTensor)
+    # print(outTensor)
+    # print(Q_output)
 
     print("absolute error:%.4e"%(atol))
     print("relative error:%.4e"%(rtol))
@@ -62,6 +89,7 @@ test_cases = [
         ((3, 2), (2, 2), 0, torch.float32, "cuda"),
         ((3, 2), (1, 2), 1, torch.float32, "cuda"),
         ((50257, 768), (16, 1024), 0, torch.float32, "cuda"),
+        ((5,5,5, 5), (6, 4,3), 0, torch.float32, "cuda"),
 
         ((3, 2), (2, 2), 0, torch.float16, "cuda"),
         ((3, 2), (1, 2), 1, torch.float16, "cuda"),
